@@ -1,0 +1,48 @@
+{
+  "name": "des-energy-monitor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Real-time distributed energy systems dashboard — solar, battery SoC, and EV charging telemetry with Supabase Realtime",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "simulate": "tsx simulator/telemetrySimulator.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "distributed-energy",
+    "energy-monitor",
+    "supabase-realtime",
+    "solar",
+    "battery",
+    "ev-charging",
+    "react",
+    "typescript",
+    "portfolio"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "recharts": "^3.10.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "dotenv": "^17.4.2",
+    "oxlint": "^1.75.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.11",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}
