@@ -9,7 +9,10 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "simulate": "tsx simulator/telemetrySimulator.ts"
+    "simulate": "tsx simulator/telemetrySimulator.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "engines": {
     "node": ">=20"
@@ -33,6 +36,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",

@@ -8,24 +8,27 @@ interface Props {
 
 /**
  * Alertas visuales: batería baja y pérdida de Realtime.
- * Separadas del layout principal para no competir con las métricas.
  */
 export function AlertBanner({ batteryCritical, connectionError, onRetry }: Props) {
   if (!batteryCritical && !connectionError) return null
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       {batteryCritical && (
         <div
           role="alert"
-          className="flex items-start gap-3 rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-rose-900"
+          data-testid="battery-alert"
+          className="flex items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--color-critical)_35%,transparent)] bg-[color-mix(in_srgb,var(--color-critical)_8%,white)] px-4 py-3.5 text-[var(--color-critical)]"
         >
-          <span className="mt-0.5 text-lg font-semibold" aria-hidden>
+          <span
+            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--color-critical)] font-mono text-xs font-bold text-white"
+            aria-hidden
+          >
             !
           </span>
           <div>
-            <p className="font-semibold">Alerta: batería crítica</p>
-            <p className="text-sm text-rose-800/90">
+            <p className="font-semibold tracking-tight">Alerta: batería crítica</p>
+            <p className="mt-0.5 text-sm text-[color-mix(in_srgb,var(--color-critical)_85%,black)]">
               El estado de carga está por debajo de {BATTERY_LOW_THRESHOLD}%.
               Considera reducir carga EV o importar de la red.
             </p>
@@ -36,17 +39,21 @@ export function AlertBanner({ batteryCritical, connectionError, onRetry }: Props
       {connectionError && (
         <div
           role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950"
+          data-testid="connection-alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color-mix(in_srgb,var(--color-warn)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-warn)_8%,white)] px-4 py-3.5 text-[var(--color-ink)]"
         >
           <div>
-            <p className="font-semibold">Problema de conexión Realtime</p>
-            <p className="text-sm text-amber-900/90">{connectionError}</p>
+            <p className="font-semibold tracking-tight text-[var(--color-warn)]">
+              Problema de conexión Realtime
+            </p>
+            <p className="mt-0.5 text-sm text-[var(--color-ink-muted)]">{connectionError}</p>
           </div>
           {onRetry && (
             <button
               type="button"
               onClick={onRetry}
-              className="rounded-md bg-amber-900 px-3 py-1.5 text-sm font-medium text-amber-50 hover:bg-amber-800"
+              data-testid="retry-connection"
+              className="rounded-lg bg-[var(--color-ink)] px-3.5 py-2 text-sm font-medium text-[var(--color-surface)] transition-colors hover:bg-[#1a2438]"
             >
               Reintentar carga
             </button>

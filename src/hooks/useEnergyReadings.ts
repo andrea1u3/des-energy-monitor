@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createE2EBridge, isE2EMockMode } from '../lib/e2eBridge'
 import { hasSupabaseConfig, supabase } from '../lib/supabase'
 import type { ConnectionState, EnergyReading } from '../types/energy'
 
@@ -15,16 +16,24 @@ interface UseEnergyReadingsResult {
 
 /**
  * Carga el historial de 24h y se suscribe a INSERT vía Supabase Realtime (WebSocket).
- * Maneja reconexión: si el canal cae, marca disconnected/error y permite refetch.
+ * En modo E2E (`?e2eMock=1`) usa el bridge in-memory — ver `e2eBridge.ts`.
  */
 export function useEnergyReadings(): UseEnergyReadingsResult {
+  const e2eMode = isE2EMockMode()
   const [readings, setReadings] = useState<EnergyReading[]>([])
-  const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [connection, setConnection] = useState<ConnectionState>(
+    e2eMode ? 'connecting' : 'connecting',
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   const fetchHistory = useCallback(async () => {
+    if (isE2EMockMode()) {
+      setLoading(false)
+      return
+    }
+
     if (!hasSupabaseConfig) {
       setError(
         'Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en tu archivo .env',
@@ -55,14 +64,38 @@ export function useEnergyReadings(): UseEnergyReadingsResult {
     setLoading(false)
   }, [])
 
+  // Mount the E2E bridge before paint so Playwright can find window.__DES_E2E__
+  useLayoutEffect(() => {
+    if (!isE2EMockMode()) return
+
+    const { subscribe } = createE2EBridge({
+      connection: 'connecting',
+      loading: true,
+      error: null,
+      readings: [],
+    })
+
+    const unsubscribe = subscribe((snapshot) => {
+      setConnection(snapshot.connection)
+      setLoading(snapshot.loading)
+      setError(snapshot.error)
+      setReadings(snapshot.readings)
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
+
   useEffect(() => {
+    if (isE2EMockMode()) return
     void fetchHistory()
   }, [fetchHistory])
 
   useEffect(() => {
+    if (isE2EMockMode()) return
     if (!hasSupabaseConfig) return
 
-    // Canal Realtime: solo eventos INSERT en energy_readings
     const channel = supabase
       .channel('energy_readings_live')
       .on(
@@ -75,10 +108,8 @@ export function useEnergyReadings(): UseEnergyReadingsResult {
         (payload) => {
           const row = payload.new as EnergyReading
           setReadings((prev) => {
-            // Evitar duplicados si el refetch y el evento llegan juntos
             if (prev.some((r) => r.id === row.id)) return prev
             const next = [...prev, row]
-            // Mantener ventana ~24h en memoria
             const cutoff = Date.now() - 24 * 60 * 60 * 1000
             return next.filter((r) => new Date(r.timestamp).getTime() >= cutoff)
           })

@@ -1,27 +1,44 @@
 # Distributed Energy Monitor
 
-**Real-time monitoring dashboard for distributed energy assets** — solar PV, battery (Powerwall-class storage), and EV charging — built as a portfolio project for Distributed Energy Systems / energy software roles.
+**Real-time operator UI for distributed energy assets** — solar PV, battery storage (Powerwall-class SoC), and EV charging — with an IoT-style telemetry publisher, Postgres + Realtime, and a Playwright suite built for live data.
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white)](./tsconfig.app.json)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-Realtime-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
-[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Playwright](https://img.shields.io/badge/E2E-Playwright-2EAD33?logo=playwright&logoColor=white)](./e2e)
+[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](./.github/workflows/e2e.yml)
 
-> Designed to demonstrate the same mental model used in residential / commercial energy products: **edge telemetry → time-series store → live operator UI**, with clear separation between the device layer and the visualization layer.
+Built by [Andrea López](https://github.com/andrea1u3) as a portfolio system for **Distributed Energy Systems / energy software / diagnostic UI** roles.
 
 ---
 
-## Why this project
+## Start here (this README is the technical intro)
 
-Teams working on distributed energy (solar + storage + EV) need operators and homeowners to see **generation, state of charge, and load** update within seconds—not after a page refresh. This repo shows:
+If you open one portfolio repo today, this is what I want you to take away:
 
-| Concern | Approach in this project |
-|--------|---------------------------|
-| Live telemetry | Supabase Realtime (WebSocket) over Postgres `INSERT`s |
-| Device vs UI | Standalone IoT simulator process (not coupled to React) |
-| Time-series queries | Indexed `energy_readings` table sized for range scans |
-| Safety / UX | Battery SoC alerts, connection loss handling, derived site status |
-| Least privilege | Browser uses anon key + RLS (read-only); simulator uses secret key |
+1. **I treat live telemetry as a product problem**, not a chart demo. Generation (kW), battery SoC (%), and EV load must update in seconds, survive connection loss, and never render `undefined` into an operator’s face.
+2. **I separate the device layer from the UI layer.** A standalone Node simulator publishes like an edge gateway; the React app only reads — same privilege model you’d want in production.
+3. **I design for the interview *and* the next engineer.** Schema indexes, RLS, failure states, Docker/Vercel paths, and E2E that don’t depend on a flaky live WebSocket in CI.
+
+Telemetry is simulated (no hardware). Status rules are explicit heuristics, not a full EMS. That honesty is intentional: the architecture is meant to be extended, not oversold.
+
+> **60-second code walk:** [`simulator/telemetrySimulator.ts`](./simulator/telemetrySimulator.ts) → [`supabase/schema.sql`](./supabase/schema.sql) → [`src/hooks/useEnergyReadings.ts`](./src/hooks/useEnergyReadings.ts) → [`e2e/fixtures/testFixtures.ts`](./e2e/fixtures/testFixtures.ts)
+
+Deep-dive talking points: [`docs/INTERVIEW_GUIDE.md`](./docs/INTERVIEW_GUIDE.md)
+
+---
+
+## What it does
+
+| Surface | Behavior |
+|--------|----------|
+| Power balance chart | Solar (kW) vs EV load (kW), last 24h, 5-minute buckets |
+| Battery gauge | Live SoC with critical alert below **15%** |
+| Site status | Generating / charging battery / exporting / importing / EV charging / idle |
+| Connection UX | `connecting` → `connected` → `disconnected` / `error`, with retry |
+| Edge simulator | Diurnal solar curve, EV sessions, SoC response to net power every 3–5s |
+
+Stack: **React 19 · TypeScript · Vite · Tailwind · Recharts · Supabase (Postgres + Realtime) · Playwright · Docker**
 
 ---
 
@@ -43,110 +60,96 @@ Teams working on distributed energy (solar + storage + EV) need operators and ho
                                                           └─────────────────────────┘
 ```
 
-### Realtime vs REST polling (interview-ready)
+### Decisions I’d defend in a design review
 
-| | REST polling | Supabase Realtime |
-|---|---|---|
-| Latency | Bound to poll interval | Push on each `INSERT` |
-| API / DB load | N clients × poll rate, even when idle | Traffic only when data changes |
-| Fit for EMS / DES | Fine for slow dashboards | Better for live kW / SoC monitoring |
+| Decision | Why | Trade-off |
+|----------|-----|-----------|
+| **Realtime (WebSocket) over REST polling** | Operators need second-scale kW/SoC; push on `INSERT` avoids idle poll tax | Requires connection-state UX and reconnect story |
+| **Simulator ≠ frontend** | Mirrors edge write / UI read; secrets never enter the Vite bundle | Two processes to run locally (realistic, not accidental) |
+| **RLS: anon SELECT only** | Least privilege for a browser client | Writes need a privileged path (simulator / future device auth) |
+| **Time-range indexes first** | Dashboard query shape is “last N hours by asset” | At thousands of assets you’d add `asset_id`, partitions, rollups |
+| **E2E bridge (`?e2eMock=1`) instead of live Supabase in CI** | Deterministic, fast, no shared secrets; same idea as a simulated diagnostic bus | Deliberate test seam in the app — documented, not hidden |
 
-### Schema designed to grow
+### Data model (built to grow)
 
-Table `energy_readings (id, asset_type, value, unit, timestamp)` with:
+`energy_readings (id, asset_type, value, unit, timestamp)`
 
-1. Index on `(timestamp DESC)` — “last 24h” site views  
-2. Composite index on `(asset_type, timestamp DESC)` — per-asset series  
-3. RLS: public/anon **SELECT** only; writes from privileged IoT credentials  
-4. Documented scale path: `asset_id` + `assets` table, time partitioning, retention jobs  
+- `(timestamp DESC)` — site-wide “last 24h”
+- `(asset_type, timestamp DESC)` — per-stream series
+- Realtime publication + RLS in [`supabase/schema.sql`](./supabase/schema.sql)
+- Documented scale path: `assets` table → `asset_id` FK → range partitioning → retention / rollups
 
-Full DDL: [`supabase/schema.sql`](./supabase/schema.sql)
+### Frontend resilience (operator UI, not happy-path only)
 
-### Frontend resilience
-
-- Loading state while hydrating 24h history  
-- Connection badge: connecting / connected / disconnected / error  
-- Manual refetch if the Realtime channel drops  
-- Visual alert when battery SoC &lt; 15%
-
----
-
-## Features
-
-- **Line chart** — solar generation (kW) vs EV consumption (kW), last 24h  
-- **Battery gauge** — live SoC (%)  
-- **Status cards** — Generating, Charging battery, Exporting to grid, Importing, EV charging  
-- **Alerts** — low battery + Realtime connectivity issues  
-- **IoT simulator** — diurnal solar curve, EV charge sessions, battery SoC response to net power  
+- Hydrate 24h history over REST, then subscribe to `INSERT`s
+- Connection badge + alert when the channel drops
+- Last-known values stay on screen (no wipe to blank/NaN)
+- Battery critical banner when SoC &lt; 15%
 
 ---
 
-## Stack
+## End-to-end testing — the non-obvious part
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Recharts  
-- **Backend / data:** Supabase (PostgreSQL + Realtime)  
-- **Simulator:** Node (`tsx`) as a separate long-running process  
+Live diagnostic UIs fail CI for boring reasons: WebSockets flake, shared backends race, and “sometimes green” teaches nothing. This suite treats that as an engineering constraint.
 
----
-
-## Project layout
+**Approach:** open the app with `?e2eMock=1` → mount `window.__DES_E2E__` ([`src/lib/e2eBridge.ts`](./src/lib/e2eBridge.ts)) → Playwright drives connection + telemetry like a fake bus. Specs also **abort** `*.supabase.co` traffic to prove isolation.
 
 ```
-src/
-  components/     Dashboard UI (chart, gauge, status, alerts)
-  hooks/          Realtime subscription + derived site state
-  lib/            Supabase client, chart bucketing, status rules
-  types/          Domain types
-simulator/        IoT-style telemetry publisher (not in the browser bundle)
-supabase/         Schema, indexes, RLS, Realtime publication
-docker/           nginx config for containerized static hosting
-docs/             Interview talking points & screenshot placeholder
+e2e/
+  pages/DashboardPage.ts     # Page Object Model
+  fixtures/testFixtures.ts   # realtime mock + dashboard fixture
+  specs/*.spec.ts            # smoke, connection, disconnect, realtime, battery, a11y
+.github/workflows/e2e.yml    # Chromium on every push / PR to main
+```
+
+**Coverage:** smoke modules · connecting→connected · disconnect without crash · push reading without reload · SoC alert · ARIA + keyboard retry.
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+npm run test:e2e:ui
+```
+
+**Why POM?** Selectors live in one place; specs read as intent (`expect(dashboard.batteryAlert).toBeVisible()`). UI refactors don’t rewrite every assertion.
+
+---
+
+## Repo map
+
+```
+src/components/   Operator UI (chart, gauge, metrics, status, alerts)
+src/hooks/        Realtime subscription + derived site state
+src/lib/          Supabase client, status rules, chart buckets, E2E bridge
+simulator/        Edge-style publisher (not in the browser bundle)
+supabase/         DDL, indexes, RLS, Realtime
+e2e/              Playwright POM + feature specs
+docs/             Interview guide + screenshot placeholder
+docker/           nginx for static container hosting
 ```
 
 ---
 
 ## Quick start
 
-### Prerequisites
-
-- Node.js 20+  
-- A free [Supabase](https://supabase.com) project  
-
-### 1. Database
-
-In the Supabase **SQL Editor**, run the full contents of [`supabase/schema.sql`](./supabase/schema.sql).
-
-### 2. Environment
+**Prereqs:** Node 20+, a free [Supabase](https://supabase.com) project.
 
 ```bash
+# 1) Schema — paste supabase/schema.sql into the Supabase SQL Editor
+
+# 2) Env
 cp .env.example .env
-```
+# VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY  → dashboard (read)
+# SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY    → simulator only (write)
 
-Fill in:
-
-| Variable | Used by | Notes |
-|----------|---------|--------|
-| `VITE_SUPABASE_URL` | Dashboard | Project URL |
-| `VITE_SUPABASE_ANON_KEY` | Dashboard | Publishable / anon key (read via RLS) |
-| `SUPABASE_URL` | Simulator | Same project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Simulator only | **Never** put this in Vercel or the frontend |
-
-### 3. Run (two terminals)
-
-```bash
+# 3) Two terminals
 npm install
 npm run dev          # http://localhost:5173
+npm run simulate     # telemetry every 3–5s
 ```
 
-```bash
-npm run simulate     # publishes solar / battery / EV every 3–5s
-```
+No simulator ⇒ UI can stay connected but no new points arrive (offline site behavior).
 
-Without the simulator, the UI stays connected but no new telemetry arrives—same as an offline site.
-
----
-
-## Docker
+### Docker (UI)
 
 ```bash
 docker build \
@@ -157,47 +160,45 @@ docker build \
 docker run --rm -p 8080:80 des-energy-monitor
 ```
 
-Run `npm run simulate` separately (edge process is not inside the static image).
+### Vercel (UI)
 
----
-
-## Deploy on Vercel
-
-1. Push this repo to GitHub and import it in [Vercel](https://vercel.com/new).  
-2. Framework preset: **Vite**.  
-3. Set env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` only.  
-4. Deploy.
-
-Keep the simulator on a local machine or a small always-on worker (Railway, Fly.io, etc.). Vercel serves the UI; it does not run long-lived IoT publishers.
+Import the repo → Vite → set **only** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.  
+Run the simulator elsewhere (local / Railway / Fly). Vercel is not an IoT worker.
 
 ---
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Vite dev server |
+| Command | Purpose |
+|---------|---------|
+| `npm run dev` | Vite dashboard |
 | `npm run build` | Production build |
-| `npm run preview` | Preview production build |
-| `npm run simulate` | IoT telemetry → Supabase |
+| `npm run simulate` | Edge telemetry → Supabase |
+| `npm run test:e2e` | Playwright suite |
+| `npm run test:e2e:ui` | Playwright UI mode |
 | `npm run lint` | Oxlint |
 
 ---
 
-## Interview notes
+## What’s next (if this became a product)
 
-See [`docs/INTERVIEW_GUIDE.md`](./docs/INTERVIEW_GUIDE.md) for concise talking points (Realtime vs polling, RLS, scale path, failure modes)—useful when walking a recruiter or hiring manager through the repo.
+- `asset_id` + multi-site tenancy; time partitions + rollup tables for the 24h chart  
+- Device auth (JWT / mTLS) instead of long-lived service role on the edge  
+- Stronger EMS state machine (replace heuristics in [`src/lib/energyStatus.ts`](./src/lib/energyStatus.ts))  
+- Contract tests between simulator payloads and UI types  
 
 ---
 
 ## Security
 
-- `.env` is gitignored. Only `.env.example` is committed.  
-- Rotate any key that was ever pasted into chat, email, or a public gist.  
-- Secret / service-role keys must never ship in the browser bundle or Vercel env for this UI.
+- `.env` is gitignored; only [`.env.example`](./.env.example) is committed  
+- Rotate any key that ever appeared in chat, email, or a public gist  
+- Secret / service-role keys must never ship in the browser bundle or Vercel env for this UI  
+
+See also [`SECURITY.md`](./SECURITY.md).
 
 ---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — [`LICENSE`](./LICENSE)
